@@ -1,0 +1,17 @@
+# ESP-IDF
+build/
+sdkconfig
+sdkconfig.old
+managed_components/
+dependencies.lock
+
+# Componentes de terceros
+esp32_firmware/components/
+
+# Python
+__pycache__/
+*.pyc
+
+# Otros
+*.log
+.vscode/

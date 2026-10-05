@@ -1,0 +1,298 @@
+Command: /home/dolores/.espressif/python_env/idf5.5_py3.12_env/bin/python /home/dolores/.espressif/v5.5/esp-idf/tools/idf_monitor.py -p /dev/ttyUSB0 -b 115200 --toolchain-prefix xtensa-esp32-elf- --target esp32 --revision 0 /home/dolores/Escritorio/Percepcion_Robotica/imu_mpu6050/esp32_firmware/build/mpu6050_dmp_microros.elf /home/dolores/Escritorio/Percepcion_Robotica/imu_mpu6050/esp32_firmware/build/bootloader/bootloader.elf -m '/home/dolores/.espressif/python_env/idf5.5_py3.12_env/bin/python' '/home/dolores/.espressif/v5.5/esp-idf/tools/idf.py'
+ntropy source...
+ets Jul 29 2019 12:21:46
+
+rst:0x1 (POWERON_RESET),boot:0x13 (SPI_FAST_FLASH_BOOT)
+configsip: 0, SPIWP:0xee
+clk_drv:0x00,q_drv:0x00,d_drv:0x00,cs0_drv:0x00,hd_drv:0x00,wp_drv:0x00
+mode:DIO, clock div:2
+load:0x3fff0030,len:6380
+ho 0 tail 12 room 4
+load:0x40078000,len:15916
+load:0x40080400,len:3860
+entry 0x40080638
+[0;32mI (29) boot: ESP-IDF v5.5 2nd stage bootloader[0m
+[0;32mI (29) boot: compile time Oct  5 2026 11:34:30[0m
+[0;32mI (29) boot: Multicore bootloader[0m
+[0;32mI (30) boot: chip revision: v3.1[0m
+[0;32mI (33) boot.esp32: SPI Speed      : 40MHz[0m
+[0;32mI (37) boot.esp32: SPI Mode       : DIO[0m
+[0;32mI (40) boot.esp32: SPI Flash Size : 2MB[0m
+[0;32mI (44) boot: Enabling RNG early entropy source...[0m
+[0;32mI (49) boot: Partition Table:[0m
+[0;32mI (51) boot: ## Label            Usage          Type ST Offset   Length[0m
+[0;32mI (57) boot:  0 nvs              WiFi data        01 02 00009000 00006000[0m
+[0;32mI (64) boot:  1 phy_init         RF data          01 01 0000f000 00001000[0m
+[0;32mI (71) boot:  2 factory          factory app      00 00 00010000 00100000[0m
+[0;32mI (77) boot: End of partition table[0m
+[0;32mI (80) esp_image: segment 0: paddr=00010020 vaddr=3f400020 size=1caa4h (117412) map[0m
+[0;32mI (128) esp_image: segment 1: paddr=0002cacc vaddr=3ff80000 size=00020h (    32) load[0m
+[0;32mI (128) esp_image: segment 2: paddr=0002caf4 vaddr=3ffb0000 size=03524h ( 13604) load[0m
+[0;32mI (137) esp_image: segment 3: paddr=00030020 vaddr=400d0020 size=9808ch (622732) map[0m
+[0;32mI (352) esp_image: segment 4: paddr=000c80b4 vaddr=3ffb3524 size=02174h (  8564) load[0m
+[0;32mI (356) esp_image: segment 5: paddr=000ca230 vaddr=40080000 size=191dch (102876) load[0m
+[0;32mI (408) boot: Loaded app from partition at offset 0x10000[0m
+[0;32mI (409) boot: Disabling RNG early entropy source...[0m
+[0;32mI (419) cpu_start: Multicore app[0m
+[0;32mI (427) cpu_start: Pro cpu start user code[0m
+[0;32mI (427) cpu_start: cpu freq: 160000000 Hz[0m
+[0;32mI (428) app_init: Application information:[0m
+[0;32mI (428) app_init: Project name:     mpu6050_dmp_microros[0m
+[0;32mI (433) app_init: App version:      1[0m
+[0;32mI (436) app_init: Compile time:     Oct  5 2026 11:34:13[0m
+[0;32mI (441) app_init: ELF file SHA256:  276e1ac28...[0m
+[0;32mI (445) app_init: ESP-IDF:          v5.5[0m
+[0;32mI (449) efuse_init: Min chip rev:     v0.0[0m
+[0;32mI (453) efuse_init: Max chip rev:     v3.99 [0m
+[0;32mI (457) efuse_init: Chip rev:         v3.1[0m
+[0;32mI (461) heap_init: Initializing. RAM available for dynamic allocation:[0m
+[0;32mI (467) heap_init: At 3FFAE6E0 len 00001920 (6 KiB): DRAM[0m
+[0;32mI (472) heap_init: At 3FFBC6C8 len 00023938 (142 KiB): DRAM[0m
+[0;32mI (477) heap_init: At 3FFE0440 len 00003AE0 (14 KiB): D/IRAM[0m
+[0;32mI (483) heap_init: At 3FFE4350 len 0001BCB0 (111 KiB): D/IRAM[0m
+[0;32mI (488) heap_init: At 400991DC len 00006E24 (27 KiB): IRAM[0m
+[0;33mW (495) spi_flash: boya detected but related driver is not linked, please check option `SPI_FLASH_SUPPORT_BOYA_CHIP`[0m
+[0;32mI (504) spi_flash: detected chip: generic[0m
+[0;32mI (507) spi_flash: flash io: dio[0m
+[0;33mW (510) spi_flash: Detected size(4096k) larger than the size in the binary image header(2048k). Using the size in the binary image header.[0m
+[0;33mW (523) i2c: This driver is an old driver, please migrate your application code to adapt `driver/i2c_master.h`[0m
+[0;32mI (533) main_task: Started on CPU0[0m
+[0;32mI (543) main_task: Calling app_main()[0m
+[0;32mI (563) wifi_station_netif: ESP_WIFI_MODE_STA[0m
+[0;32mI (573) wifi:wifi driver task: 3ffc4724, prio:23, stack:6656, core=0[0m
+[0;32mI (583) wifi:wifi firmware version: f3dbad7[0m
+[0;32mI (583) wifi:wifi certification version: v7.0[0m
+[0;32mI (583) wifi:config NVS flash: enabled[0m
+[0;32mI (583) wifi:config nano formatting: disabled[0m
+[0;32mI (593) wifi:Init data frame dynamic rx buffer num: 32[0m
+[0;32mI (593) wifi:Init static rx mgmt buffer num: 5[0m
+[0;32mI (593) wifi:Init management short buffer num: 32[0m
+[0;32mI (603) wifi:Init dynamic tx buffer num: 32[0m
+[0;32mI (603) wifi:Init static rx buffer size: 1600[0m
+[0;32mI (613) wifi:Init static rx buffer num: 10[0m
+[0;32mI (613) wifi:Init dynamic rx buffer num: 32[0m
+[0;32mI (623) wifi_init: rx ba win: 6[0m
+[0;32mI (623) wifi_init: accept mbox: 6[0m
+[0;32mI (623) wifi_init: tcpip mbox: 32[0m
+[0;32mI (623) wifi_init: udp mbox: 6[0m
+[0;32mI (633) wifi_init: tcp mbox: 6[0m
+[0;32mI (633) wifi_init: tcp tx win: 5760[0m
+[0;32mI (633) wifi_init: tcp rx win: 5760[0m
+[0;32mI (643) wifi_init: tcp mss: 1440[0m
+[0;32mI (643) wifi_init: WiFi IRAM OP enabled[0m
+[0;32mI (643) wifi_init: WiFi RX IRAM OP enabled[0m
+[0;33mW (653) wifi:Password length matches WPA2 standards, authmode threshold changes from OPEN to WPA2[0m
+[0;32mI (653) phy_init: phy_version 4860,6b7a6e5,Feb  6 2025,14:47:07[0m
+[0;32mI (743) phy_init: Saving new calibration data due to checksum failure or outdated calibration data, mode(0)[0m
+[0;32mI (763) wifi:mode : sta (3c:8a:1f:78:f6:f8)[0m
+[0;32mI (763) wifi:enable tsf[0m
+[0;32mI (773) wifi_station_netif: wifi_init_sta finished.[0m
+[0;32mI (783) wifi:new:<1,0>, old:<1,0>, ap:<255,255>, sta:<1,0>, prof:1, snd_ch_cfg:0x0[0m
+[0;32mI (783) wifi:state: init -> auth (0xb0)[0m
+[0;32mI (1783) wifi:state: auth -> init (0x200)[0m
+[0;32mI (1793) wifi:new:<1,0>, old:<1,0>, ap:<255,255>, sta:<1,0>, prof:1, snd_ch_cfg:0x0[0m
+[0;32mI (1793) wifi_station_netif: retry to connect to the AP[0m
+[0;32mI (1793) wifi_station_netif: connect to the AP fail[0m
+[0;32mI (4213) wifi_station_netif: retry to connect to the AP[0m
+[0;32mI (4213) wifi_station_netif: connect to the AP fail[0m
+[0;32mI (4223) wifi:new:<1,0>, old:<1,0>, ap:<255,255>, sta:<1,0>, prof:1, snd_ch_cfg:0x0[0m
+[0;32mI (4223) wifi:state: init -> auth (0xb0)[0m
+[0;32mI (4233) wifi:state: auth -> assoc (0x0)[0m
+[0;32mI (4243) wifi:state: assoc -> run (0x10)[0m
+[0;32mI (4263) wifi:connected with ClaroSuppo, aid = 4, channel 1, BW20, bssid = 96:90:10:d5:b6:3c[0m
+[0;32mI (4263) wifi:security: WPA2-PSK, phy: bgn, rssi: -52[0m
+[0;32mI (4263) wifi:pm start, type: 1[0m
+
+[0;32mI (4263) wifi:dp: 1, bi: 102400, li: 3, scale listen interval from 307200 us to 307200 us[0m
+[0;32mI (4353) wifi:AP's beacon interval = 102400 us, DTIM period = 1[0m
+[0;32mI (7463) esp_netif_handlers: sta ip: 192.168.100.57, mask: 255.255.255.0, gw: 192.168.100.1[0m
+[0;32mI (7463) wifi_station_netif: got ip:192.168.100.57[0m
+[0;32mI (7463) wifi_station_netif: connected to ap SSID:ClaroSuppo password:008875682[0m
+
+
+Resetting MPU6050...
+[0;32mI (7473) main_task: Returned from app_main()[0m
+Disabling sleep mode...
+Selecting user bank 16...
+Selecting memory byte 6...
+Checking hardware revision...
+Revision @ user[16][6] = 
+0x00a5f
+Resetting memory bank selection to 0...
+Reading OTP bank valid flag...
+OTP bank is 
+valid!
+Reading gyro offset TC values...
+X gyro offset = 
+63Y gyro offset = 
+62Z gyro offset = 
+63Setting slave 0 address to 0x7F...
+Disabling I2C Master mode...
+Setting slave 0 address to 0x68 (self)...
+Resetting I2C Master control...
+Writing DMP code to MPU memory banks (
+1929 bytes)
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+[0;32mI (7573) wifi:VERIFY[0m
+<ba-add>idx:0 (ifx:0, 96:90:10:d5:b6:3c), tid:6, ssn:1, winSize:64
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+VERIFY
+Success! DMP code written and verified.
+VERIFY
+Success! DMP configuration written and verified.
+Setting clock source to Z Gyro...
+Setting DMP and FIFO_OFLOW interrupts enabled...
+Setting sample rate to 200Hz...
+Setting external frame sync to TEMP_OUT_L[0]...
+Setting DLPF bandwidth to 42Hz...
+Setting gyro sensitivity to +/- 2000 deg/sec...
+Setting DMP programm start address
+Clearing OTP Bank flag...
+Setting X/Y/Z gyro offset TCs to previous values...
+Resetting FIFO...
+Reading FIFO count...
+Current FIFO count=
+0Setting motion detection threshold to 2...
+Setting zero-motion detection threshold to 156...
+Setting motion detection duration to 80...
+Setting zero-motion detection duration to 0...
+Resetting FIFO...
+Enabling FIFO...
+Enabling DMP...
+Resetting DMP...
+Waiting for FIFO count > 2...
+Current FIFO count=
+42Reading FIFO data...
+Reading interrupt status...
+Current interrupt status=
+0x0007f
+Waiting for FIFO count > 2...
+Current FIFO count=
+42Reading FIFO data...
+Reading interrupt status...
+Current interrupt status=
+0x0003f
+DMP is good to go! Finally.
+Disabling DMP (you turn it on later)...
+Setting up internal 42-byte (default) DMP packet buffer...
+Resetting FIFO and clearing INT status one last time...
+DMP OK. Paquete de 42 bytes, rango acc 0, rango gyro 3
+[0;32mI (8033) wifi:<ba-add>idx:1 (ifx:0, 96:90:10:d5:b6:3c), tid:0, ssn:1, winSize:64[0m
+ (200903) err: esp_err_t = -1
