@@ -49,3 +49,37 @@ En las ventanas de graficos, la tecla R reinicia velocidad y posicion.
 2. Que la IP de la PC siga siendo la configurada en menuconfig (hostname -I).
 3. Que la terminal use ROS_DOMAIN_ID=33.
 4. Cableado I2C: probar con test_firmware/mpu6050_i2c_bringup.
+
+## Instalacion de dependencias (despues de clonar)
+
+Los componentes de terceros no estan incluidos en el repositorio. Con ROS2 y
+ESP-IDF cargados en la terminal:
+
+    git clone https://github.com/tps-percepcion-robotica/tp4-imu-mpu6050.git
+    cd tp4-imu-mpu6050/esp32_firmware
+    mkdir -p components
+
+1. micro-ROS para ESP-IDF (usar la rama de la distro de ROS2 instalada):
+
+        git clone -b $ROS_DISTRO https://github.com/micro-ROS/micro_ros_espidf_component.git components/micro_ros_espidf_component
+        pip3 install catkin_pkg lark-parser colcon-common-extensions
+
+2. Driver del MPU-6050 con soporte de DMP (i2cdevlib):
+
+        git clone --depth 1 https://github.com/jrowberg/i2cdevlib.git /tmp/i2cdevlib
+        cp -r /tmp/i2cdevlib/ESP32_ESP-IDF/components/I2Cdev components/
+        cp -r /tmp/i2cdevlib/ESP32_ESP-IDF/components/MPU6050 components/
+
+3. CMakeLists de esos dos componentes para ESP-IDF 5.x:
+
+        printf 'file(GLOB srcs "*.cpp")\nidf_component_register(SRCS ${srcs} INCLUDE_DIRS "." REQUIRES driver)\ntarget_compile_options(${COMPONENT_LIB} PRIVATE -w)\n' > components/I2Cdev/CMakeLists.txt
+        printf 'file(GLOB srcs "*.cpp")\nidf_component_register(SRCS ${srcs} INCLUDE_DIRS "." REQUIRES I2Cdev driver)\ntarget_compile_options(${COMPONENT_LIB} PRIVATE -w)\n' > components/MPU6050/CMakeLists.txt
+
+4. Configurar, compilar y flashear:
+
+        idf.py set-target esp32
+        idf.py menuconfig      # micro-ROS Settings: SSID, contrasena, IP de la PC, puerto 8888
+        idf.py build flash monitor
+
+La primera compilacion tarda entre 10 y 30 minutos porque construye la
+libreria de micro-ROS.
