@@ -1,2 +1,2 @@
-source /home/dolores/Escritorio/Percepcion_Robotica/imu_mpu6050/esp32_firmware/build/bootloader/gdbinit/symbols
-source /home/dolores/Escritorio/Percepcion_Robotica/imu_mpu6050/esp32_firmware/build/bootloader/gdbinit/connect
+source /home/cande/Desktop/GrupoMixto_TPs/tp4-imu-mpu6050/esp32_firmware/build/bootloader/gdbinit/symbols
+source /home/cande/Desktop/GrupoMixto_TPs/tp4-imu-mpu6050/esp32_firmware/build/bootloader/gdbinit/connect

@@ -5,6 +5,7 @@
 //   - filtro propio:  usa aceleracion + giroscopio e ignora la orientacion
 //   - DMP:            usa la orientacion del mensaje
 // Requiere los componentes I2Cdev y MPU6050 de i2cdevlib (ver setup_dmp.sh).
+// Espera al agente micro-ROS y se reconecta solo si se pierde: no hace falta apretar EN.
 #include <stdio.h>
 #include <string.h>
 
@@ -31,16 +32,26 @@ extern "C" {
 
 #define PIN_SDA        21
 #define PIN_SCL        22
-#define ROS_DOMAIN     33
+#define ROS_DOMAIN     22
+
+// Cada cuanto se verifica que el agente siga vivo, y cuantos pings fallidos seguidos
+// se toleran antes de considerar la conexion perdida.
+#define PING_PERIOD_MS 1000
+#define PING_FAILS_MAX 3
 
 #define RCCHECK(fn) { rcl_ret_t rc_ = fn; if (rc_ != RCL_RET_OK) { \
-    printf("Fallo en linea %d: %d. Abortando.\n", __LINE__, (int)rc_); vTaskDelete(NULL); } }
+    printf("Fallo en linea %d: %d.\n", __LINE__, (int)rc_); return false; } }
 
+static rcl_allocator_t allocator;
+static rclc_support_t support;
+static rcl_node_t node;
 static rcl_publisher_t publisher;
 static sensor_msgs__msg__Imu msg;
 static char frame_id[] = "imu_link";
 static MPU6050 mpu;
 static uint8_t fifo_buffer[64];
+// Que entidades llegaron a crearse (para destruir solo esas si algo falla a mitad)
+static bool support_ok, node_ok, publisher_ok;
 
 static void i2c_init(void)
 {
@@ -53,6 +64,109 @@ static void i2c_init(void)
     conf.master.clk_speed = 400000;
     ESP_ERROR_CHECK(i2c_param_config(I2C_NUM_0, &conf));
     ESP_ERROR_CHECK(i2c_driver_install(I2C_NUM_0, I2C_MODE_MASTER, 0, 0, 0));
+}
+
+// Espera hasta que el agente micro-ROS responda. Asi no importa si el ESP32 arranca
+// antes o despues que el agente: no hace falta apretar EN.
+static void wait_for_agent(void)
+{
+    rcl_init_options_t opts = rcl_get_zero_initialized_init_options();
+    rcl_init_options_init(&opts, allocator);
+#ifdef CONFIG_MICRO_ROS_ESP_XRCE_DDS_MIDDLEWARE
+    rmw_init_options_t *rmw_options = rcl_init_options_get_rmw_init_options(&opts);
+    rmw_uros_options_set_udp_address(CONFIG_MICRO_ROS_AGENT_IP, CONFIG_MICRO_ROS_AGENT_PORT, rmw_options);
+    printf("Esperando al agente micro-ROS en %s:%s ...\n", CONFIG_MICRO_ROS_AGENT_IP, CONFIG_MICRO_ROS_AGENT_PORT);
+    while (rmw_uros_ping_agent_options(200, 1, rmw_options) != RMW_RET_OK) {
+        vTaskDelay(pdMS_TO_TICKS(500));
+    }
+#endif
+    rcl_init_options_fini(&opts);
+    printf("Agente encontrado.\n");
+}
+
+static bool create_entities(void)
+{
+    support_ok = node_ok = publisher_ok = false;
+    rcl_init_options_t init_options = rcl_get_zero_initialized_init_options();
+    RCCHECK(rcl_init_options_init(&init_options, allocator));
+    RCCHECK(rcl_init_options_set_domain_id(&init_options, ROS_DOMAIN));
+#ifdef CONFIG_MICRO_ROS_ESP_XRCE_DDS_MIDDLEWARE
+    rmw_init_options_t *rmw_options = rcl_init_options_get_rmw_init_options(&init_options);
+    RCCHECK(rmw_uros_options_set_udp_address(CONFIG_MICRO_ROS_AGENT_IP,
+                                             CONFIG_MICRO_ROS_AGENT_PORT, rmw_options));
+#endif
+    rcl_ret_t rc = rclc_support_init_with_options(&support, 0, NULL, &init_options, &allocator);
+    rcl_init_options_fini(&init_options);
+    RCCHECK(rc);
+    support_ok = true;
+
+    node = rcl_get_zero_initialized_node();
+    RCCHECK(rclc_node_init_default(&node, "mpu6050_dmp_node", "", &support));
+    node_ok = true;
+
+    publisher = rcl_get_zero_initialized_publisher();
+    RCCHECK(rclc_publisher_init_best_effort(
+        &publisher, &node,
+        ROSIDL_GET_MSG_TYPE_SUPPORT(sensor_msgs, msg, Imu),
+        "imu/data_raw"));
+    publisher_ok = true;
+
+    rmw_uros_sync_session(1000);    // sincroniza el reloj con la PC para los timestamps
+    printf("Conectado. Publicando en /imu/data_raw (dominio %d).\n", ROS_DOMAIN);
+    return true;
+}
+
+static void destroy_entities(void)
+{
+    if (!support_ok)
+        return;
+    // El agente puede no responder: no esperar su confirmacion al destruir cada entidad
+    rmw_context_t *rmw_context = rcl_context_get_rmw_context(&support.context);
+    (void)rmw_uros_set_context_entity_destroy_session_timeout(rmw_context, 0);
+    if (publisher_ok) (void)rcl_publisher_fini(&publisher, &node);
+    if (node_ok)      (void)rcl_node_fini(&node);
+    (void)rclc_support_fini(&support);
+    support_ok = node_ok = publisher_ok = false;
+}
+
+// Lee el paquete mas reciente del DMP y lo publica. Devuelve false si no habia paquete.
+static bool publish_imu(uint16_t packet_size, float acc_scale, float gyr_scale)
+{
+    uint16_t fifo_count = mpu.getFIFOCount();
+    if (fifo_count >= 1024) {           // desborde: descartar y empezar de nuevo
+        mpu.resetFIFO();
+        return false;
+    }
+    if (fifo_count < packet_size)       // todavia no hay un paquete completo
+        return false;
+    // Leer todos los paquetes pendientes y quedarse con el mas reciente
+    while (fifo_count >= packet_size) {
+        mpu.getFIFOBytes(fifo_buffer, packet_size);
+        fifo_count -= packet_size;
+    }
+
+    Quaternion q;
+    int16_t ax, ay, az, gx, gy, gz;
+    mpu.dmpGetQuaternion(&q, fifo_buffer);
+    mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
+
+    int64_t ns = rmw_uros_epoch_nanos();
+    msg.header.stamp.sec = (int32_t)(ns / 1000000000LL);
+    msg.header.stamp.nanosec = (uint32_t)(ns % 1000000000LL);
+
+    msg.orientation.w = q.w;
+    msg.orientation.x = q.x;
+    msg.orientation.y = q.y;
+    msg.orientation.z = q.z;
+    msg.linear_acceleration.x = ax * acc_scale;
+    msg.linear_acceleration.y = ay * acc_scale;
+    msg.linear_acceleration.z = az * acc_scale;
+    msg.angular_velocity.x = gx * gyr_scale;
+    msg.angular_velocity.y = gy * gyr_scale;
+    msg.angular_velocity.z = gz * gyr_scale;
+
+    (void)rcl_publish(&publisher, &msg, NULL);
+    return true;
 }
 
 static void micro_ros_task(void *arg)
@@ -75,78 +189,35 @@ static void micro_ros_task(void *arg)
     printf("DMP OK. Paquete de %d bytes, rango acc %d, rango gyro %d\n",
            packet_size, mpu.getFullScaleAccelRange(), mpu.getFullScaleGyroRange());
 
-    // ---- micro-ROS ----
-    rcl_allocator_t allocator = rcl_get_default_allocator();
-    rclc_support_t support;
-
-    rcl_init_options_t init_options = rcl_get_zero_initialized_init_options();
-    RCCHECK(rcl_init_options_init(&init_options, allocator));
-    RCCHECK(rcl_init_options_set_domain_id(&init_options, ROS_DOMAIN));
-
-#ifdef CONFIG_MICRO_ROS_ESP_XRCE_DDS_MIDDLEWARE
-    rmw_init_options_t *rmw_options = rcl_init_options_get_rmw_init_options(&init_options);
-    RCCHECK(rmw_uros_options_set_udp_address(CONFIG_MICRO_ROS_AGENT_IP,
-                                             CONFIG_MICRO_ROS_AGENT_PORT, rmw_options));
-#endif
-
-    RCCHECK(rclc_support_init_with_options(&support, 0, NULL, &init_options, &allocator));
-
-    rcl_node_t node;
-    RCCHECK(rclc_node_init_default(&node, "mpu6050_dmp_node", "", &support));
-
-    RCCHECK(rclc_publisher_init_best_effort(
-        &publisher, &node,
-        ROSIDL_GET_MSG_TYPE_SUPPORT(sensor_msgs, msg, Imu),
-        "imu/data_raw"));
-
-    rmw_uros_sync_session(1000);
-
     memset(&msg, 0, sizeof(msg));
     msg.header.frame_id.data = frame_id;
     msg.header.frame_id.size = strlen(frame_id);
     msg.header.frame_id.capacity = sizeof(frame_id);
 
-    Quaternion q;
-    int16_t ax, ay, az, gx, gy, gz;
-    mpu.resetFIFO();
+    allocator = rcl_get_default_allocator();
 
+    // ---- micro-ROS: conectar, publicar, y si se pierde el agente volver a esperar ----
     while (1) {
-        uint16_t fifo_count = mpu.getFIFOCount();
-
-        if (fifo_count >= 1024) {           // desborde: descartar y empezar de nuevo
-            mpu.resetFIFO();
+        wait_for_agent();
+        if (!create_entities()) {
+            destroy_entities();
+            vTaskDelay(pdMS_TO_TICKS(1000));
             continue;
         }
-        if (fifo_count < packet_size) {     // todavia no hay un paquete completo
-            vTaskDelay(1);
-            continue;
+        mpu.resetFIFO();                // descartar lo acumulado mientras no habia conexion
+
+        TickType_t last_ping = xTaskGetTickCount();
+        int ping_fails = 0;
+        while (ping_fails < PING_FAILS_MAX) {
+            if (!publish_imu(packet_size, acc_scale, gyr_scale))
+                vTaskDelay(1);
+            if (xTaskGetTickCount() - last_ping >= pdMS_TO_TICKS(PING_PERIOD_MS)) {
+                last_ping = xTaskGetTickCount();
+                ping_fails = (rmw_uros_ping_agent(50, 1) == RMW_RET_OK) ? 0 : ping_fails + 1;
+            }
         }
-        // Leer todos los paquetes pendientes y quedarse con el mas reciente
-        while (fifo_count >= packet_size) {
-            mpu.getFIFOBytes(fifo_buffer, packet_size);
-            fifo_count -= packet_size;
-        }
-
-        mpu.dmpGetQuaternion(&q, fifo_buffer);
-        mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
-
-        int64_t ns = rmw_uros_epoch_nanos();
-        msg.header.stamp.sec = (int32_t)(ns / 1000000000LL);
-        msg.header.stamp.nanosec = (uint32_t)(ns % 1000000000LL);
-
-        msg.orientation.w = q.w;
-        msg.orientation.x = q.x;
-        msg.orientation.y = q.y;
-        msg.orientation.z = q.z;
-        msg.linear_acceleration.x = ax * acc_scale;
-        msg.linear_acceleration.y = ay * acc_scale;
-        msg.linear_acceleration.z = az * acc_scale;
-        msg.angular_velocity.x = gx * gyr_scale;
-        msg.angular_velocity.y = gy * gyr_scale;
-        msg.angular_velocity.z = gz * gyr_scale;
-
-        rcl_ret_t rc = rcl_publish(&publisher, &msg, NULL);
-        (void)rc;
+        printf("Se perdio la conexion con el agente. Reconectando...\n");
+        destroy_entities();
     }
 }
 

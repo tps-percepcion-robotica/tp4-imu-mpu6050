@@ -11,8 +11,11 @@ Publica:
   - 3 TFs (odom -> imu_link_dmp / _comp / _madg) para visualización simultánea en RViz2.
   - Abre una ventana comparando Roll, Pitch, Yaw y Posición Z.
 """
+import fcntl
 import math
+import os
 import threading
+from datetime import datetime
 from collections import deque
 
 import numpy as np
@@ -37,6 +40,11 @@ def q_mult(a, b):
         aw * by - ax * bz + ay * bw + az * bx,
         aw * bz + ax * by - ay * bx + az * bw,
     ])
+
+
+def q_conj(q):
+    """Conjugado (inversa de un cuaternion unitario)."""
+    return np.array([q[0], -q[1], -q[2], -q[3]])
 
 
 def q_to_rot(q):
@@ -80,6 +88,9 @@ class ImuFusion(Node):
         self.kp = self.declare_parameter('kp', 2.0).value
         self.beta = self.declare_parameter('beta', 0.1).value
         self.n_calib = self.declare_parameter('calib_samples', 300).value
+        # CSV donde se agrega una fila por cada calibracion ('' para desactivar)
+        self.calib_log = self.declare_parameter('calib_log', 'calibraciones.csv').value
+        self.t_calib0 = None
 
         # ZUPT (zero velocity update): si detecta reposo, fuerza velocidad = 0
         self.zupt = self.declare_parameter('zupt', False).value
@@ -103,6 +114,9 @@ class ImuFusion(Node):
 
         # Estado
         self.q = np.array([1.0, 0.0, 0.0, 0.0])
+        self.q_off = np.array([1.0, 0.0, 0.0, 0.0])   # alinea el DMP con el cero comun
+        self.q_dmp = None                             # ultimo cuaternion crudo del DMP
+        self.recalib = False                          # pedido de tecla R / servicio ~/reset
         self.vel = np.zeros(3)
         self.pos = np.zeros(3)
         self.t_prev = None
@@ -117,9 +131,32 @@ class ImuFusion(Node):
         self.get_logger().info(f'Iniciando [{alg_name}]. Calibrando sensor...')
 
     def reset(self):
-        self.vels[:] = 0.0
-        self.poss[:] = 0.0
-        self.get_logger().info('Velocidades y posiciones reiniciadas')
+        # Se aplica en on_imu para no tocar el estado desde otro hilo
+        self.recalib = True
+        self.get_logger().info('Reinicio pedido: dejar el sensor QUIETO ~2 s para recalibrar')
+
+    def log_calibration(self, mean_acc, span):
+        """Agrega una fila al CSV de calibraciones (lo leen los tres nodos a la vez)."""
+        if not self.calib_log:
+            return
+        alg = 'DMP' if self.use_msg_q else self.filter_type
+        # Mensajes recibidos por segundo: ~200 Hz (tasa del DMP); menos = se pierden mensajes
+        rate = self.n_calib / span if span > 0 else 0.0
+        row = [datetime.now().isoformat(timespec='seconds'), self.get_name(), alg,
+               self.n_calib, f'{span:.2f}', f'{rate:.0f}',
+               *[f'{b:.5f}' for b in self.gyro_bias],
+               *[f'{a:.4f}' for a in mean_acc], f'{self.g:.4f}']
+        header = ['fecha', 'nodo', 'metodo', 'muestras', 'duracion_s', 'frecuencia_hz',
+                  'bias_gx_rad_s', 'bias_gy_rad_s', 'bias_gz_rad_s',
+                  'acc_x_m_s2', 'acc_y_m_s2', 'acc_z_m_s2', 'g_medido_m_s2']
+        try:
+            with open(self.calib_log, 'a') as f:
+                fcntl.flock(f, fcntl.LOCK_EX)   # evita que dos nodos escriban la misma linea
+                if os.fstat(f.fileno()).st_size == 0:
+                    f.write(','.join(header) + '\n')
+                f.write(','.join(map(str, row)) + '\n')
+        except OSError as e:
+            self.get_logger().warn(f'No se pudo escribir {self.calib_log}: {e}')
 
     def on_reset(self, request, response):
         self.reset()
@@ -129,9 +166,23 @@ class ImuFusion(Node):
         acc = np.array([msg.linear_acceleration.x, msg.linear_acceleration.y, msg.linear_acceleration.z])
         gyr = np.array([msg.angular_velocity.x, msg.angular_velocity.y, msg.angular_velocity.z])
         t = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+        q_msg = np.array([msg.orientation.w, msg.orientation.x, msg.orientation.y, msg.orientation.z])
+        if np.linalg.norm(q_msg) > 1e-6:
+            self.q_dmp = q_msg / np.linalg.norm(q_msg)
 
-        # ---- Calibración inicial ----
+        if self.recalib:
+            self.recalib = False
+            self.count = 0
+            self.sum_acc[:] = 0.0
+            self.sum_gyr[:] = 0.0
+            self.vel[:] = 0.0
+            self.pos[:] = 0.0
+            self.still_count = 0
+
+        # ---- Calibración inicial (y recalibración con la tecla R) ----
         if self.count < self.n_calib:
+            if self.count == 0:
+                self.t_calib0 = t
             self.sum_acc += acc
             self.sum_gyr += gyr
             self.count += 1
@@ -141,14 +192,22 @@ class ImuFusion(Node):
                 self.gyro_bias = self.sum_gyr / self.n_calib
                 self.g = float(np.linalg.norm(mean_acc))
                 self.q = q_from_accel(mean_acc)
+                # Cero comun: los tres metodos arrancan con roll/pitch del acelerometro
+                # y yaw = 0. El DMP tiene su propia referencia, asi que se guarda la
+                # rotacion que lleva su orientacion actual a ese mismo cero.
+                if self.use_msg_q and self.q_dmp is not None:
+                    self.q_off = q_mult(self.q, q_conj(self.q_dmp))
                 self.get_logger().info(
                     f'Listo. Bias gyro [rad/s]: {np.round(self.gyro_bias, 4)}, '
                     f'|g| medido: {self.g:.3f} m/s2')
+                self.log_calibration(mean_acc, t - self.t_calib0)
             return
 
         dt = t - self.t_prev
+        if dt <= 0.0:               # mensaje duplicado o desordenado: no integrarlo dos veces
+            return
         self.t_prev = t
-        if not 0.0 < dt < 0.1:      # timestamp invalido o salto: usar periodo nominal
+        if dt > 0.1:                # salto (se perdieron mensajes): usar periodo nominal
             dt = 0.01
 
         a_norm = np.linalg.norm(acc)
@@ -157,9 +216,8 @@ class ImuFusion(Node):
         # ---- Selección de Actitud ----
         if self.use_msg_q:
             # Hardware DMP
-            n_dmp = np.linalg.norm([msg.orientation.w, msg.orientation.x, msg.orientation.y, msg.orientation.z])
-            if n_dmp > 1e-6:
-                self.q = np.array([msg.orientation.w, msg.orientation.x, msg.orientation.y, msg.orientation.z]) / n_dmp
+            if self.q_dmp is not None:
+                self.q = q_mult(self.q_off, self.q_dmp)
 
         elif self.filter_type == 'madgwick':
             # Filtro Madgwick
@@ -210,7 +268,7 @@ class ImuFusion(Node):
         with self.lock:
             self.hist.append((self.t_rel, *np.degrees(q_to_euler(self.q)), *acc_world, *self.vel, *self.pos))
 
-        self.publish()
+        self.publish_tfs()
 
     def publish_tfs(self):
         now = self.get_clock().now().to_msg()
@@ -233,7 +291,9 @@ class ImuFusion(Node):
         od.header.stamp = now
         od.header.frame_id = 'odom'
         od.child_frame_id = self.child_frame
-        od.pose.pose.position = tf.transform.translation
+        od.pose.pose.position.x = float(self.pos[0])
+        od.pose.pose.position.y = float(self.pos[1])
+        od.pose.pose.position.z = float(self.pos[2])
         od.pose.pose.orientation = tf.transform.rotation
         od.twist.twist.linear.x = float(self.vel[0])
         od.twist.twist.linear.y = float(self.vel[1])
@@ -308,8 +368,8 @@ def run_plot(node):
 def spin_node(node):
     try:
         rclpy.spin(node)
-    except Exception:
-        pass
+    except Exception as e:
+        node.get_logger().error(f'El nodo se detuvo: {e!r}')
 
 
 def main():

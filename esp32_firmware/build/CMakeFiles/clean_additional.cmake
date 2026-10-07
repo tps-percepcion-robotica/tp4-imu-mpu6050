@@ -20,9 +20,9 @@ if("${CONFIG}" STREQUAL "" OR "${CONFIG}" STREQUAL "")
   "mpu6050_dmp_microros.map"
   "project_elf_src_esp32.c"
   "x509_crt_bundle.S"
-  "/home/dolores/Escritorio/Percepcion_Robotica/imu_mpu6050/esp32_firmware/components/micro_ros_espidf_component/esp32_toolchain.cmake"
-  "/home/dolores/Escritorio/Percepcion_Robotica/imu_mpu6050/esp32_firmware/components/micro_ros_espidf_component/include"
-  "/home/dolores/Escritorio/Percepcion_Robotica/imu_mpu6050/esp32_firmware/components/micro_ros_espidf_component/micro_ros_dev"
-  "/home/dolores/Escritorio/Percepcion_Robotica/imu_mpu6050/esp32_firmware/components/micro_ros_espidf_component/micro_ros_src"
+  "/home/cande/Desktop/GrupoMixto_TPs/tp4-imu-mpu6050/esp32_firmware/components/micro_ros_espidf_component/esp32_toolchain.cmake"
+  "/home/cande/Desktop/GrupoMixto_TPs/tp4-imu-mpu6050/esp32_firmware/components/micro_ros_espidf_component/include"
+  "/home/cande/Desktop/GrupoMixto_TPs/tp4-imu-mpu6050/esp32_firmware/components/micro_ros_espidf_component/micro_ros_dev"
+  "/home/cande/Desktop/GrupoMixto_TPs/tp4-imu-mpu6050/esp32_firmware/components/micro_ros_espidf_component/micro_ros_src"
   )
 endif()

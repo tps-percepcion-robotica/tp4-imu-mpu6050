@@ -6,22 +6,22 @@ cmake_minimum_required(VERSION 3.5)
 # If CMAKE_DISABLE_SOURCE_CHANGES is set to true and the source directory is an
 # existing directory in our source tree, calling file(MAKE_DIRECTORY) on it
 # would cause a fatal error, even though it would be a no-op.
-if(NOT EXISTS "/home/dolores/.espressif/v5.5/esp-idf/components/bootloader/subproject")
-  file(MAKE_DIRECTORY "/home/dolores/.espressif/v5.5/esp-idf/components/bootloader/subproject")
+if(NOT EXISTS "/home/cande/.espressif/v5.5/esp-idf/components/bootloader/subproject")
+  file(MAKE_DIRECTORY "/home/cande/.espressif/v5.5/esp-idf/components/bootloader/subproject")
 endif()
 file(MAKE_DIRECTORY
-  "/home/dolores/Escritorio/Percepcion_Robotica/imu_mpu6050/esp32_firmware/build/bootloader"
-  "/home/dolores/Escritorio/Percepcion_Robotica/imu_mpu6050/esp32_firmware/build/bootloader-prefix"
-  "/home/dolores/Escritorio/Percepcion_Robotica/imu_mpu6050/esp32_firmware/build/bootloader-prefix/tmp"
-  "/home/dolores/Escritorio/Percepcion_Robotica/imu_mpu6050/esp32_firmware/build/bootloader-prefix/src/bootloader-stamp"
-  "/home/dolores/Escritorio/Percepcion_Robotica/imu_mpu6050/esp32_firmware/build/bootloader-prefix/src"
-  "/home/dolores/Escritorio/Percepcion_Robotica/imu_mpu6050/esp32_firmware/build/bootloader-prefix/src/bootloader-stamp"
+  "/home/cande/Desktop/GrupoMixto_TPs/tp4-imu-mpu6050/esp32_firmware/build/bootloader"
+  "/home/cande/Desktop/GrupoMixto_TPs/tp4-imu-mpu6050/esp32_firmware/build/bootloader-prefix"
+  "/home/cande/Desktop/GrupoMixto_TPs/tp4-imu-mpu6050/esp32_firmware/build/bootloader-prefix/tmp"
+  "/home/cande/Desktop/GrupoMixto_TPs/tp4-imu-mpu6050/esp32_firmware/build/bootloader-prefix/src/bootloader-stamp"
+  "/home/cande/Desktop/GrupoMixto_TPs/tp4-imu-mpu6050/esp32_firmware/build/bootloader-prefix/src"
+  "/home/cande/Desktop/GrupoMixto_TPs/tp4-imu-mpu6050/esp32_firmware/build/bootloader-prefix/src/bootloader-stamp"
 )
 
 set(configSubDirs )
 foreach(subDir IN LISTS configSubDirs)
-    file(MAKE_DIRECTORY "/home/dolores/Escritorio/Percepcion_Robotica/imu_mpu6050/esp32_firmware/build/bootloader-prefix/src/bootloader-stamp/${subDir}")
+    file(MAKE_DIRECTORY "/home/cande/Desktop/GrupoMixto_TPs/tp4-imu-mpu6050/esp32_firmware/build/bootloader-prefix/src/bootloader-stamp/${subDir}")
 endforeach()
 if(cfgdir)
-  file(MAKE_DIRECTORY "/home/dolores/Escritorio/Percepcion_Robotica/imu_mpu6050/esp32_firmware/build/bootloader-prefix/src/bootloader-stamp${cfgdir}") # cfgdir has leading slash
+  file(MAKE_DIRECTORY "/home/cande/Desktop/GrupoMixto_TPs/tp4-imu-mpu6050/esp32_firmware/build/bootloader-prefix/src/bootloader-stamp${cfgdir}") # cfgdir has leading slash
 endif()

@@ -1,1 +1,1 @@
-/home/dolores/.espressif/v5.5/esp-idf/components/mbedtls/mbedtls/library/ssl_debug_helpers_generated.c
+/home/cande/.espressif/v5.5/esp-idf/components/mbedtls/mbedtls/library/ssl_debug_helpers_generated.c

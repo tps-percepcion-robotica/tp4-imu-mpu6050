@@ -10,9 +10,8 @@ trap 'kill 0' INT TERM EXIT
 
 ros2 run micro_ros_agent micro_ros_agent udp4 --port 8888 &
 sleep 2
-echo
-echo ">>> Reiniciar el ESP32 (boton EN) y dejar el sensor QUIETO unos 10 segundos <<<"
-echo
+# El ESP32 se conecta solo al agente (no hace falta apretar EN).
+# Cada estimador calibra con las primeras muestras: dejar el sensor quieto ~2 s.
 
 # Metodo 1: filtro complementario sobre datos crudos
 python3 imu_state_estimator.py --ros-args -r __node:=complementary_estimator \
