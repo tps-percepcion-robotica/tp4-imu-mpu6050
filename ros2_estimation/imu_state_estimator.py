@@ -20,10 +20,11 @@ import rclpy
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from geometry_msgs.msg import Point, TransformStamped
-from visualization_msgs.msg import Marker, MarkerArray
+from nav_msgs.msg import Odometry
 from sensor_msgs.msg import Imu
 from std_srvs.srv import Empty
 from tf2_ros import TransformBroadcaster
+from visualization_msgs.msg import Marker
 
 
 def q_mult(a, b):
@@ -69,10 +70,15 @@ def q_to_euler(q):
 
 class ImuFusion(Node):
     def __init__(self):
-        super().__init__('imu_fusion_compare')
+        super().__init__('imu_estimator')
         self.topic = self.declare_parameter('topic', 'imu/data_raw').value
-        self.kp_comp = self.declare_parameter('kp_comp', 2.0).value  # peso del acelerometro
-        self.beta_madg = self.declare_parameter('beta_madg', 0.1).value
+        self.child_frame = self.declare_parameter('child_frame', 'imu_link').value
+        
+        # Selección de algoritmo
+        self.use_msg_q = self.declare_parameter('use_msg_orientation', False).value
+        self.filter_type = self.declare_parameter('filter_type', 'complementary').value
+        self.kp = self.declare_parameter('kp', 2.0).value
+        self.beta = self.declare_parameter('beta', 0.1).value
         self.n_calib = self.declare_parameter('calib_samples', 300).value
 
         # ZUPT (zero velocity update): si detecta reposo, fuerza velocidad = 0
@@ -84,7 +90,7 @@ class ImuFusion(Node):
         self.plot = self.declare_parameter('plot', True).value
         self.plot_window = self.declare_parameter('plot_window_s', 20.0).value
 
-        # Historial: (t, r0, r1, r2, p0, p1, p2, y0, y1, y2, z0, z1, z2) -> 13 variables
+        # Historial
         self.hist = deque(maxlen=int(self.plot_window * 100))
         self.lock = threading.Lock()
         self.t_rel = 0.0
@@ -95,22 +101,24 @@ class ImuFusion(Node):
         self.gyro_bias = np.zeros(3)
         self.g = 9.80665
 
-        # Estado para los 3 métodos: 0=DMP, 1=Comp, 2=Madgwick
-        self.qs = [np.array([1.0, 0.0, 0.0, 0.0]) for _ in range(3)]
-        self.vels = [np.zeros(3) for _ in range(3)]
-        self.poss = [np.zeros(3) for _ in range(3)]
+        # Estado
+        self.q = np.array([1.0, 0.0, 0.0, 0.0])
+        self.vel = np.zeros(3)
+        self.pos = np.zeros(3)
         self.t_prev = None
 
         self.tf_br = TransformBroadcaster(self)
-        self.pub_markers = self.create_publisher(MarkerArray, '~/velocity_markers', 10)
+        self.pub_odom = self.create_publisher(Odometry, '~/odom', 10)
+        self.pub_marker = self.create_publisher(Marker, '~/velocity_marker', 10)
         self.create_service(Empty, '~/reset', self.on_reset)
         self.create_subscription(Imu, self.topic, self.on_imu, qos_profile_sensor_data)
-        self.get_logger().info('Calibrando: dejar el sensor QUIETO unos segundos...')
+        
+        alg_name = "DMP" if self.use_msg_q else self.filter_type.upper()
+        self.get_logger().info(f'Iniciando [{alg_name}]. Calibrando sensor...')
 
     def reset(self):
-        for i in range(3):
-            self.vels[i][:] = 0.0
-            self.poss[i][:] = 0.0
+        self.vels[:] = 0.0
+        self.poss[:] = 0.0
         self.get_logger().info('Velocidades y posiciones reiniciadas')
 
     def on_reset(self, request, response):
@@ -132,9 +140,7 @@ class ImuFusion(Node):
                 mean_acc = self.sum_acc / self.n_calib
                 self.gyro_bias = self.sum_gyr / self.n_calib
                 self.g = float(np.linalg.norm(mean_acc))
-                q_init = q_from_accel(mean_acc)
-                for i in range(3):
-                    self.qs[i] = q_init.copy()
+                self.q = q_from_accel(mean_acc)
                 self.get_logger().info(
                     f'Listo. Bias gyro [rad/s]: {np.round(self.gyro_bias, 4)}, '
                     f'|g| medido: {self.g:.3f} m/s2')
@@ -148,122 +154,110 @@ class ImuFusion(Node):
         a_norm = np.linalg.norm(acc)
         w = gyr - self.gyro_bias
 
-        # 0. Hardware DMP
-        n_dmp = np.linalg.norm([msg.orientation.w, msg.orientation.x, msg.orientation.y, msg.orientation.z])
-        if n_dmp > 1e-6:
-            self.qs[0] = np.array([msg.orientation.w, msg.orientation.x, msg.orientation.y, msg.orientation.z]) / n_dmp
+        # ---- Selección de Actitud ----
+        if self.use_msg_q:
+            # Hardware DMP
+            n_dmp = np.linalg.norm([msg.orientation.w, msg.orientation.x, msg.orientation.y, msg.orientation.z])
+            if n_dmp > 1e-6:
+                self.q = np.array([msg.orientation.w, msg.orientation.x, msg.orientation.y, msg.orientation.z]) / n_dmp
 
-        # 1. Filtro Complementario (Mahony)
-        if abs(a_norm - self.g) < 0.1 * self.g:
-            up_est = q_to_rot(self.qs[1])[2, :]
-            err = np.cross(acc / a_norm, up_est)
-            w_comp = w + self.kp_comp * err
+        elif self.filter_type == 'madgwick':
+            # Filtro Madgwick
+            s0, s1, s2, s3 = 0.0, 0.0, 0.0, 0.0
+            qw, qx, qy, qz = self.q
+            if a_norm > 0:
+                ax, ay, az = acc / a_norm
+                s0 = 4*qw*qy**2 + 2*qy*ax + 4*qw*qx**2 - 2*qx*ay
+                s1 = 4*qx*qz**2 - 2*qz*ax + 4*qw**2*qx - 2*qw*ay - 4*qx + 8*qx**3 + 8*qx*qy**2 + 4*qx*az
+                s2 = 4*qw**2*qy + 2*qw*ax + 4*qy*qz**2 - 2*qz*ay - 4*qy + 8*qy*qx**2 + 8*qy**3 + 4*qy*az
+                s3 = 4*qx**2*qz - 2*qx*ax + 4*qy**2*qz - 2*qy*ay
+                s_norm = math.sqrt(s0**2 + s1**2 + s2**2 + s3**2)
+                if s_norm > 0:
+                    s0 /= s_norm; s1 /= s_norm; s2 /= s_norm; s3 /= s_norm
+
+            qDot = np.array([
+                0.5 * (-qx*w[0] - qy*w[1] - qz*w[2]) - self.beta * s0,
+                0.5 * ( qw*w[0] + qy*w[2] - qz*w[1]) - self.beta * s1,
+                0.5 * ( qw*w[1] - qx*w[2] + qz*w[0]) - self.beta * s2,
+                0.5 * ( qw*w[2] + qx*w[1] - qy*w[0]) - self.beta * s3
+            ])
+            self.q = self.q + qDot * dt
+            self.q /= np.linalg.norm(self.q)
+
         else:
-            w_comp = w
-        dq_comp = 0.5 * q_mult(self.qs[1], np.array([0.0, w_comp[0], w_comp[1], w_comp[2]]))
-        self.qs[1] = self.qs[1] + dq_comp * dt
-        self.qs[1] /= np.linalg.norm(self.qs[1])
+            # Filtro Complementario (Default)
+            if abs(a_norm - self.g) < 0.1 * self.g:
+                up_est = q_to_rot(self.q)[2, :]
+                err = np.cross(acc / a_norm, up_est)
+                w = w + self.kp * err
+            dq = 0.5 * q_mult(self.q, np.array([0.0, w[0], w[1], w[2]]))
+            self.q = self.q + dq * dt
+            self.q /= np.linalg.norm(self.q)
 
-        # 2. Filtro de Madgwick
-        s0, s1, s2, s3 = 0.0, 0.0, 0.0, 0.0
-        qw, qx, qy, qz = self.qs[2]
-        if a_norm > 0:
-            ax, ay, az = acc / a_norm
-            s0 = 4*qw*qy**2 + 2*qy*ax + 4*qw*qx**2 - 2*qx*ay
-            s1 = 4*qx*qz**2 - 2*qz*ax + 4*qw**2*qx - 2*qw*ay - 4*qx + 8*qx**3 + 8*qx*qy**2 + 4*qx*az
-            s2 = 4*qw**2*qy + 2*qw*ax + 4*qy*qz**2 - 2*qz*ay - 4*qy + 8*qy*qx**2 + 8*qy**3 + 4*qy*az
-            s3 = 4*qx**2*qz - 2*qx*ax + 4*qy**2*qz - 2*qy*ay
-            s_norm = math.sqrt(s0**2 + s1**2 + s2**2 + s3**2)
-            if s_norm > 0:
-                s0 /= s_norm; s1 /= s_norm; s2 /= s_norm; s3 /= s_norm
-
-        qDot = np.array([
-            0.5 * (-qx*w[0] - qy*w[1] - qz*w[2]) - self.beta_madg * s0,
-            0.5 * ( qw*w[0] + qy*w[2] - qz*w[1]) - self.beta_madg * s1,
-            0.5 * ( qw*w[1] - qx*w[2] + qz*w[0]) - self.beta_madg * s2,
-            0.5 * ( qw*w[2] + qx*w[1] - qy*w[0]) - self.beta_madg * s3
-        ])
-        self.qs[2] = self.qs[2] + qDot * dt
-        self.qs[2] /= np.linalg.norm(self.qs[2])
-
-        # ---- Condición ZUPT general ----
+        # ---- Cinemática ----
+        acc_world = q_to_rot(self.q) @ acc - np.array([0.0, 0.0, self.g])
+        self.vel += acc_world * dt
+        
         if self.zupt:
             still = (np.linalg.norm(w) < self.zupt_gyro and abs(a_norm - self.g) < self.zupt_acc)
             self.still_count = self.still_count + 1 if still else 0
-
-        # ---- Cinemática para los 3 métodos ----
-        eu = []
-        for i in range(3):
-            eu.append(np.degrees(q_to_euler(self.qs[i])))
-            acc_world = q_to_rot(self.qs[i]) @ acc - np.array([0.0, 0.0, self.g])
-            self.vels[i] += acc_world * dt
-            if self.zupt and self.still_count >= 20:
-                self.vels[i][:] = 0.0
-            self.poss[i] += self.vels[i] * dt
-
-        # Registro para gráficos
+            if self.still_count >= 20:
+                self.vel[:] = 0.0
+        
+        self.pos += self.vel * dt
         self.t_rel += dt
-        with self.lock:
-            self.hist.append((
-                self.t_rel,
-                eu[0][0], eu[1][0], eu[2][0],  # Roll: DMP, Comp, Madg
-                eu[0][1], eu[1][1], eu[2][1],  # Pitch
-                eu[0][2], eu[1][2], eu[2][2],  # Yaw
-                self.poss[0][2], self.poss[1][2], self.poss[2][2] # Altura Z
-            ))
 
-        self.publish_tfs()
+        with self.lock:
+            self.hist.append((self.t_rel, *np.degrees(q_to_euler(self.q)), *acc_world, *self.vel, *self.pos))
+
+        self.publish()
 
     def publish_tfs(self):
         now = self.get_clock().now().to_msg()
-        names = ['dmp', 'comp', 'madg']
-        
-        for i in range(3):
-            tf = TransformStamped()
-            tf.header.stamp = now
-            tf.header.frame_id = 'odom'
-            tf.child_frame_id = f'imu_link_{names[i]}'
-            tf.transform.translation.x = float(self.poss[i][0])
-            tf.transform.translation.y = float(self.poss[i][1])
-            tf.transform.translation.z = float(self.poss[i][2])
-            tf.transform.rotation.w = float(self.qs[i][0])
-            tf.transform.rotation.x = float(self.qs[i][1])
-            tf.transform.rotation.y = float(self.qs[i][2])
-            tf.transform.rotation.z = float(self.qs[i][3])
-            self.tf_br.sendTransform(tf)
+        w, x, y, z = self.q
 
-        # Publicar las 3 flechas de velocidad
-        ma = MarkerArray()
-        # Colores RGB: DMP (Rojo), Comp (Verde), Madgwick (Azul)
-        colors = [(1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.5, 1.0)] 
-        
-        for i in range(3):
-            mk = Marker()
-            mk.header.stamp = now
-            mk.header.frame_id = 'odom'
-            mk.ns = f'vel_{names[i]}'
-            mk.id = i
-            mk.type = Marker.ARROW
-            mk.action = Marker.ADD
-            mk.pose.orientation.w = 1.0
-            
-            # Origen en la posición estimada, fin en la posición + vector velocidad
-            end = self.poss[i] + self.vels[i]
-            mk.points = [
-                Point(x=float(self.poss[i][0]), y=float(self.poss[i][1]), z=float(self.poss[i][2])),
-                Point(x=float(end[0]), y=float(end[1]), z=float(end[2]))
-            ]
-            mk.scale.x = 0.02   # diámetro del cuerpo de la flecha
-            mk.scale.y = 0.04   # diámetro de la punta
-            
-            mk.color.r = colors[i][0]
-            mk.color.g = colors[i][1]
-            mk.color.b = colors[i][2]
-            mk.color.a = 0.8    # Ligeramente transparente para que no se tapen si coinciden
-            
-            ma.markers.append(mk)
+        tf = TransformStamped()
+        tf.header.stamp = now
+        tf.header.frame_id = 'odom'
+        tf.child_frame_id = self.child_frame
+        tf.transform.translation.x = float(self.pos[0])
+        tf.transform.translation.y = float(self.pos[1])
+        tf.transform.translation.z = float(self.pos[2])
+        tf.transform.rotation.w = float(w)
+        tf.transform.rotation.x = float(x)
+        tf.transform.rotation.y = float(y)
+        tf.transform.rotation.z = float(z)
+        self.tf_br.sendTransform(tf)
 
-        self.pub_markers.publish(ma)
+        od = Odometry()
+        od.header.stamp = now
+        od.header.frame_id = 'odom'
+        od.child_frame_id = self.child_frame
+        od.pose.pose.position = tf.transform.translation
+        od.pose.pose.orientation = tf.transform.rotation
+        od.twist.twist.linear.x = float(self.vel[0])
+        od.twist.twist.linear.y = float(self.vel[1])
+        od.twist.twist.linear.z = float(self.vel[2])
+        self.pub_odom.publish(od)
+
+        mk = Marker()
+        mk.header.stamp = now
+        mk.header.frame_id = 'odom'
+        mk.ns = self.get_name()
+        mk.id = 0
+        mk.type = Marker.ARROW
+        mk.action = Marker.ADD
+        mk.pose.orientation.w = 1.0
+        end = self.pos + self.vel
+        mk.points = [Point(x=float(self.pos[0]), y=float(self.pos[1]), z=float(self.pos[2])),
+                     Point(x=float(end[0]), y=float(end[1]), z=float(end[2]))]
+        mk.scale.x = 0.02
+        mk.scale.y = 0.04
+        mk.color.r = 0.0 if self.filter_type == 'madgwick' else 1.0
+        mk.color.g = 1.0 if not self.use_msg_q else 0.0
+        mk.color.b = 1.0 if self.filter_type == 'madgwick' else 0.0
+        mk.color.a = 1.0
+        self.pub_marker.publish(mk)
 
 def run_plot(node):
     """Graficos en vivo. Bloquea hasta que se cierra la ventana."""
@@ -271,55 +265,45 @@ def run_plot(node):
     from matplotlib.animation import FuncAnimation
 
     panels = [
-        ('Roll [grados]',   (1, 2, 3)),
-        ('Pitch [grados]',  (4, 5, 6)),
-        ('Yaw [grados]',    (7, 8, 9)),
-        ('Posición Z [m]',  (10, 11, 12)),
+        ('Actitud [grados]', ('roll', 'pitch', 'yaw')),
+        ('Aceleracion en el mundo [m/s2]', ('x', 'y', 'z')),
+        ('Velocidad [m/s]', ('x', 'y', 'z')),
+        ('Posicion [m]', ('x', 'y', 'z')),
     ]
-    labels = ['DMP', 'Comp', 'Madg']
-    colors = ['r', 'g', 'b']
-
-    fig, axes = plt.subplots(4, 1, sharex=True, figsize=(10, 9))
-    fig.suptitle('Comparación de Filtros IMU', fontsize=12)
-    lines_list = []
-
-    for ax, (title, idxs) in zip(axes, panels):
+    fig, axes = plt.subplots(4, 1, sharex=True, figsize=(9, 9))
+    alg = "DMP" if node.use_msg_q else node.filter_type.capitalize()
+    fig.suptitle(f'{node.get_name()}: {alg} {"+ ZUPT" if node.zupt else ""}', fontsize=11)
+    
+    lines = []
+    for ax, (title, labels) in zip(axes, panels):
         ax.set_title(title, fontsize=10)
         ax.grid(True)
-        ax_lines = []
-        for i, idx in enumerate(idxs):
-            line, = ax.plot([], [], label=labels[i], color=colors[i], alpha=0.8)
-            ax_lines.append(line)
-        lines_list.append((ax_lines, idxs))
+        for label in labels:
+            lines.append(ax.plot([], [], label=label)[0])
         ax.legend(loc='upper left', ncol=3, fontsize=8)
-
-    axes[-1].set_xlabel('Tiempo [s]     (tecla R: reiniciar velocidades y posiciones)')
+    axes[-1].set_xlabel('Tiempo [s]     (tecla R: reiniciar)')
 
     def on_key(event):
         if event.key in ('r', 'R'):
             node.reset()
-
     fig.canvas.mpl_connect('key_press_event', on_key)
 
     def update(_frame):
         with node.lock:
             data = np.array(node.hist)
-        if len(data) < 2:
-            return [l for ax_lines, _ in lines_list for l in ax_lines]
-        
+        if len(data) < 2: return lines
         t = data[:, 0]
-        for ax, (ax_lines, idxs) in zip(axes, lines_list):
-            for line, idx in zip(ax_lines, idxs):
-                line.set_data(t, data[:, idx])
+        for i, line in enumerate(lines):
+            line.set_data(t, data[:, i + 1])
+        for ax in axes:
             ax.relim()
             ax.autoscale_view()
         axes[0].set_xlim(t[0], max(t[-1], t[0] + 1.0))
-        return [l for ax_lines, _ in lines_list for l in ax_lines]
+        return lines
 
-    anim = FuncAnimation(fig, update, interval=100, cache_frame_data=False)  # noqa: F841
+    anim = FuncAnimation(fig, update, interval=100, cache_frame_data=False) # noqa: F841
     fig.tight_layout()
     plt.show()
-
 
 def spin_node(node):
     try:

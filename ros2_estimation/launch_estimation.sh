@@ -20,6 +20,9 @@ python3 imu_state_estimator.py --ros-args -r __node:=complementary_estimator \
 # Metodo 2: orientacion del DMP
 python3 imu_state_estimator.py --ros-args -r __node:=dmp_estimator \
     -p use_msg_orientation:=true -p child_frame:=imu_link_dmp -p zupt:=$ZUPT &
+# Metodo 3: Madgwick
+python3 imu_state_estimator.py --ros-args -r __node:=madgwick_estimator \
+    -p filter_type:=madgwick -p child_frame:=imu_link_madg -p zupt:=$ZUPT &
 
 if [ -f imu_tf_view.rviz ]; then rviz2 -d imu_tf_view.rviz & else rviz2 & fi
 wait
