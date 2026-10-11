@@ -5606,7 +5606,10 @@
                         "help": "Select Tx Down pin for uart connection or -1 for no change (Only used if serial transport is used for microros).",
                         "id": "MICROROS_UART_TXD",
                         "name": "MICROROS_UART_TXD",
-                        "range": null,
+                        "range": [
+                            -1,
+                            33
+                        ],
                         "title": "UART TX pin",
                         "type": "int"
                     },
@@ -5616,7 +5619,10 @@
                         "help": "Select Rx Down pin for uart connection or -1 for no change (Only used if serial transport is used for microros).",
                         "id": "MICROROS_UART_RXD",
                         "name": "MICROROS_UART_RXD",
-                        "range": null,
+                        "range": [
+                            -1,
+                            33
+                        ],
                         "title": "UART RX pin",
                         "type": "int"
                     },
@@ -5626,7 +5632,10 @@
                         "help": "Select RTS Down pin for uart connection or -1 for no change (Only used if serial transport is used for microros).",
                         "id": "MICROROS_UART_RTS",
                         "name": "MICROROS_UART_RTS",
-                        "range": null,
+                        "range": [
+                            -1,
+                            33
+                        ],
                         "title": "UART RTS pin",
                         "type": "int"
                     },
@@ -5636,7 +5645,10 @@
                         "help": "Select CTS Down pin for uart connection or -1 for no change (Only used if serial transport is used for microros).",
                         "id": "MICROROS_UART_CTS",
                         "name": "MICROROS_UART_CTS",
-                        "range": null,
+                        "range": [
+                            -1,
+                            33
+                        ],
                         "title": "UART CTS pin",
                         "type": "int"
                     }

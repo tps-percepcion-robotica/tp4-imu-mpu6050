@@ -22,7 +22,7 @@ import numpy as np
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
-from geometry_msgs.msg import Point, TransformStamped
+from geometry_msgs.msg import Point, TransformStamped, Vector3Stamped
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import Imu
 from std_srvs.srv import Empty
@@ -94,6 +94,14 @@ class ImuFusion(Node):
 
         # ZUPT (zero velocity update): si detecta reposo, fuerza velocidad = 0
         self.zupt = self.declare_parameter('zupt', False).value
+        # TF solo con la rotacion (el frame queda en un punto fijo, sin moverse); la
+        # posicion calculada sigue saliendo en ~/odom igual. true para que el TF tambien
+        # se desplace con la posicion estimada (puede alejarse mucho si el metodo deriva).
+        self.tf_posicion = self.declare_parameter('tf_posicion', False).value
+        # Punto fijo (en 'odom') donde se dibuja este frame, solo para separarlos en RViz
+        # y poder ver la actitud de cada metodo por separado (no afecta ~/odom ni las
+        # comparaciones: ahi se sigue usando la posicion real sin este offset).
+        self.tf_offset = self.declare_parameter('tf_offset', [0.0, 0.0, 0.0]).value
         self.zupt_gyro = self.declare_parameter('zupt_gyro', 0.05).value   # rad/s
         self.zupt_acc = self.declare_parameter('zupt_acc', 0.3).value      # m/s2
         self.still_count = 0
@@ -117,14 +125,37 @@ class ImuFusion(Node):
         self.q_off = np.array([1.0, 0.0, 0.0, 0.0])   # alinea el DMP con el cero comun
         self.q_dmp = None                             # ultimo cuaternion crudo del DMP
         self.recalib = False                          # pedido de tecla R / servicio ~/reset
+        # Re-medicion de |g| sin tocar orientacion/posicion (tecla G / servicio ~/remedir_gravedad):
+        # util cuando el sensor quedo en una posicion donde el acelerometro mide otro valor de
+        # gravedad (offset/escala distintos por eje) y por eso "ve" movimiento estando quieto.
+        self.remedir_g = False
+        self.remedir_n = self.declare_parameter('remedir_samples', 50).value
+        self.remedir_count = 0
+        self.remedir_sum_acc = np.zeros(3)
         self.vel = np.zeros(3)
         self.pos = np.zeros(3)
         self.t_prev = None
 
+        # Mismos colores que el reloj contra el encoder (AGUJAS en comparar_encoder.py), para
+        # que la flecha de actitud se identifique de un vistazo. No se importa ese modulo para
+        # evitar un import circular (el ya importa de aca); mantener sincronizado a mano.
+        if self.use_msg_q:
+            self.metodo_color = (0.122, 0.467, 0.706)   # tab:blue  (dmp)
+        elif self.filter_type == 'madgwick':
+            self.metodo_color = (0.173, 0.627, 0.173)   # tab:green (madg)
+        else:
+            self.metodo_color = (1.000, 0.498, 0.055)   # tab:orange (comp)
+
         self.tf_br = TransformBroadcaster(self)
         self.pub_odom = self.create_publisher(Odometry, '~/odom', 10)
         self.pub_marker = self.create_publisher(Marker, '~/velocity_marker', 10)
+        # Flecha corta en el eje Z del sensor (el que se compara contra el encoder):
+        # muestra la actitud de cada metodo sin tener que leer los ejes RGB de la TF.
+        self.pub_attitude = self.create_publisher(Marker, '~/attitude_marker', 10)
+        # Aceleracion en el mundo (sin gravedad), para la ventana que compara los metodos
+        self.pub_acc = self.create_publisher(Vector3Stamped, '~/accel_world', 10)
         self.create_service(Empty, '~/reset', self.on_reset)
+        self.create_service(Empty, '~/remedir_gravedad', self.on_remedir_gravedad)
         self.create_subscription(Imu, self.topic, self.on_imu, qos_profile_sensor_data)
         
         alg_name = "DMP" if self.use_msg_q else self.filter_type.upper()
@@ -133,7 +164,22 @@ class ImuFusion(Node):
     def reset(self):
         # Se aplica en on_imu para no tocar el estado desde otro hilo
         self.recalib = True
+        self.remedir_g = False
         self.get_logger().info('Reinicio pedido: dejar el sensor QUIETO ~2 s para recalibrar')
+
+    def remedir_gravedad(self):
+        """Vuelve a medir |g| en la posicion actual del sensor, sin tocar orientacion ni
+        posicion. Pone la velocidad en 0 (el residuo de gravedad mal restada ya no se integra
+        mas, pero no deshace la posicion que ya se acumulo)."""
+        if self.count < self.n_calib:
+            self.get_logger().warn('Todavia calibrando: esperar a que termine para remedir la gravedad')
+            return
+        if self.recalib:
+            return
+        self.remedir_g = True
+        self.remedir_count = 0
+        self.remedir_sum_acc[:] = 0.0
+        self.get_logger().info('Remidiendo gravedad: dejar el sensor QUIETO en esta posicion')
 
     def log_calibration(self, mean_acc, span):
         """Agrega una fila al CSV de calibraciones (lo leen los tres nodos a la vez)."""
@@ -160,6 +206,10 @@ class ImuFusion(Node):
 
     def on_reset(self, request, response):
         self.reset()
+        return response
+
+    def on_remedir_gravedad(self, request, response):
+        self.remedir_gravedad()
         return response
 
     def on_imu(self, msg):
@@ -202,6 +252,17 @@ class ImuFusion(Node):
                     f'|g| medido: {self.g:.3f} m/s2')
                 self.log_calibration(mean_acc, t - self.t_calib0)
             return
+
+        if self.remedir_g:
+            self.remedir_sum_acc += acc
+            self.remedir_count += 1
+            if self.remedir_count >= self.remedir_n:
+                mean_acc = self.remedir_sum_acc / self.remedir_count
+                self.g = float(np.linalg.norm(mean_acc))
+                self.vel[:] = 0.0
+                self.still_count = 0
+                self.remedir_g = False
+                self.get_logger().info(f'Gravedad re-medida en esta posicion: |g| = {self.g:.3f} m/s2')
 
         dt = t - self.t_prev
         if dt <= 0.0:               # mensaje duplicado o desordenado: no integrarlo dos veces
@@ -268,19 +329,28 @@ class ImuFusion(Node):
         with self.lock:
             self.hist.append((self.t_rel, *np.degrees(q_to_euler(self.q)), *acc_world, *self.vel, *self.pos))
 
-        self.publish_tfs()
+        am = Vector3Stamped()
+        am.header.stamp = msg.header.stamp
+        am.header.frame_id = 'odom'
+        am.vector.x, am.vector.y, am.vector.z = (float(a) for a in acc_world)
+        self.pub_acc.publish(am)
+        self.publish_tfs(msg.header.stamp)
 
-    def publish_tfs(self):
-        now = self.get_clock().now().to_msg()
+    def publish_tfs(self, stamp):
+        # Timestamp de la muestra del sensor (no la hora de publicacion), para poder
+        # emparejar cada estimacion con la lectura del encoder del mismo instante
+        now = stamp
         w, x, y, z = self.q
 
         tf = TransformStamped()
         tf.header.stamp = now
         tf.header.frame_id = 'odom'
         tf.child_frame_id = self.child_frame
-        tf.transform.translation.x = float(self.pos[0])
-        tf.transform.translation.y = float(self.pos[1])
-        tf.transform.translation.z = float(self.pos[2])
+        base = self.pos if self.tf_posicion else np.zeros(3)
+        origen = base + self.tf_offset
+        tf.transform.translation.x = float(origen[0])
+        tf.transform.translation.y = float(origen[1])
+        tf.transform.translation.z = float(origen[2])
         tf.transform.rotation.w = float(w)
         tf.transform.rotation.x = float(x)
         tf.transform.rotation.y = float(y)
@@ -319,6 +389,23 @@ class ImuFusion(Node):
         mk.color.a = 1.0
         self.pub_marker.publish(mk)
 
+        ap = Marker()
+        ap.header.stamp = now
+        ap.header.frame_id = 'odom'
+        ap.ns = self.get_name() + '_actitud'
+        ap.id = 0
+        ap.type = Marker.ARROW
+        ap.action = Marker.ADD
+        ap.pose.orientation.w = 1.0
+        punta = origen + q_to_rot(self.q) @ np.array([0.0, 0.0, 0.2])
+        ap.points = [Point(x=float(origen[0]), y=float(origen[1]), z=float(origen[2])),
+                     Point(x=float(punta[0]), y=float(punta[1]), z=float(punta[2]))]
+        ap.scale.x = 0.015
+        ap.scale.y = 0.035
+        ap.color.r, ap.color.g, ap.color.b = self.metodo_color
+        ap.color.a = 1.0
+        self.pub_attitude.publish(ap)
+
 def run_plot(node):
     """Graficos en vivo. Bloquea hasta que se cierra la ventana."""
     import matplotlib.pyplot as plt
@@ -341,11 +428,13 @@ def run_plot(node):
         for label in labels:
             lines.append(ax.plot([], [], label=label)[0])
         ax.legend(loc='upper left', ncol=3, fontsize=8)
-    axes[-1].set_xlabel('Tiempo [s]     (tecla R: reiniciar)')
+    axes[-1].set_xlabel('Tiempo [s]     (tecla R: reiniciar, tecla G: remedir gravedad)')
 
     def on_key(event):
         if event.key in ('r', 'R'):
             node.reset()
+        elif event.key in ('g', 'G'):
+            node.remedir_gravedad()
     fig.canvas.mpl_connect('key_press_event', on_key)
 
     def update(_frame):

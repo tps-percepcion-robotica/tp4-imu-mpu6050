@@ -8,6 +8,10 @@ dependencies.lock
 # Componentes de terceros
 esp32_firmware/components/
 
+# ROS2 / colcon
+ros2_estimation/install/
+ros2_estimation/log/
+
 # Python
 __pycache__/
 *.pyc

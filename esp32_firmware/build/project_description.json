@@ -1,7 +1,7 @@
 {
     "version":            "1.2",
     "project_name":       "mpu6050_dmp_microros",
-    "project_version":    "7a4a505-dirty",
+    "project_version":    "3212ccb-dirty",
     "project_path":       "/home/cande/Desktop/GrupoMixto_TPs/tp4-imu-mpu6050/esp32_firmware",
     "idf_path":           "/home/cande/.espressif/v5.5/esp-idf",
     "build_dir":          "/home/cande/Desktop/GrupoMixto_TPs/tp4-imu-mpu6050/esp32_firmware/build",
@@ -1255,7 +1255,7 @@
             "managed_reqs": [],
             "managed_priv_reqs": [],
             "file": "/home/cande/Desktop/GrupoMixto_TPs/tp4-imu-mpu6050/esp32_firmware/build/esp-idf/main/libmain.a",
-            "sources": [ "/home/cande/Desktop/GrupoMixto_TPs/tp4-imu-mpu6050/esp32_firmware/main/main.cpp" ],
+            "sources": [ "/home/cande/Desktop/GrupoMixto_TPs/tp4-imu-mpu6050/esp32_firmware/main/main.cpp", "/home/cande/Desktop/GrupoMixto_TPs/tp4-imu-mpu6050/esp32_firmware/main/esp32_serial_transport.c" ],
             "include_dirs": [ "." ]
         },
         "mbedtls": {
